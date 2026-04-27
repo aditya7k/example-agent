@@ -1,0 +1,118 @@
+name: Bump tag
+description: >
+  Reads the latest semver tag in the repository, increments it by the supplied
+  major / minor / patch amounts, then creates and pushes the new tag.
+
+inputs:
+  major:
+    description: Amount to add to the major version (resets minor & patch to 0 if > 0).
+    required: false
+    default: "0"
+  minor:
+    description: Amount to add to the minor version (resets patch to 0 if > 0).
+    required: false
+    default: "0"
+  patch:
+    description: Amount to add to the patch version.
+    required: false
+    default: "1"
+  prefix:
+    description: Tag prefix.
+    required: false
+    default: "v"
+  initial:
+    description: Version to use when no prior tag exists (without prefix).
+    required: false
+    default: "0.0.0"
+  push:
+    description: Whether to push the new tag to origin.
+    required: false
+    default: "true"
+
+outputs:
+  previous_tag:
+    description: The latest matching tag found before bumping (empty if none).
+    value: ${{ steps.bump.outputs.previous_tag }}
+  new_tag:
+    description: The newly created tag.
+    value: ${{ steps.bump.outputs.new_tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute and create tag
+      id: bump
+      shell: bash
+      env:
+        IN_MAJOR: ${{ inputs.major }}
+        IN_MINOR: ${{ inputs.minor }}
+        IN_PATCH: ${{ inputs.patch }}
+        PREFIX: ${{ inputs.prefix }}
+        INITIAL: ${{ inputs.initial }}
+        PUSH: ${{ inputs.push }}
+      run: |
+        set -euo pipefail
+
+        # Validate inputs are non-negative integers.
+        for name in IN_MAJOR IN_MINOR IN_PATCH; do
+          val="${!name}"
+          if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+            echo "::error::input $name must be a non-negative integer (got '$val')"
+            exit 1
+          fi
+        done
+
+        if [[ "$IN_MAJOR" -eq 0 && "$IN_MINOR" -eq 0 && "$IN_PATCH" -eq 0 ]]; then
+          echo "::error::at least one of major/minor/patch must be > 0"
+          exit 1
+        fi
+
+        # Make sure we can see all tags from a shallow checkout.
+        git fetch --tags --force --quiet || true
+
+        # Find the highest existing semver tag with the configured prefix.
+        latest="$(git tag --list "${PREFIX}[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n1 || true)"
+
+        if [[ -z "$latest" ]]; then
+          base="$INITIAL"
+          previous_tag=""
+        else
+          base="${latest#${PREFIX}}"
+          previous_tag="$latest"
+        fi
+
+        if ! [[ "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          echo "::error::could not parse version '$base' from tag '${previous_tag:-<initial>}'"
+          exit 1
+        fi
+        M="${BASH_REMATCH[1]}"
+        m="${BASH_REMATCH[2]}"
+        p="${BASH_REMATCH[3]}"
+
+        if [[ "$IN_MAJOR" -gt 0 ]]; then
+          M=$((M + IN_MAJOR)); m=0; p=0
+        fi
+        if [[ "$IN_MINOR" -gt 0 ]]; then
+          m=$((m + IN_MINOR)); p=0
+        fi
+        if [[ "$IN_PATCH" -gt 0 ]]; then
+          p=$((p + IN_PATCH))
+        fi
+
+        new_tag="${PREFIX}${M}.${m}.${p}"
+
+        if git rev-parse -q --verify "refs/tags/${new_tag}" >/dev/null; then
+          echo "::error::tag ${new_tag} already exists"
+          exit 1
+        fi
+
+        echo "previous_tag=${previous_tag}"   | tee -a "$GITHUB_OUTPUT"
+        echo "new_tag=${new_tag}"             | tee -a "$GITHUB_OUTPUT"
+
+        git config user.name  "${GITHUB_ACTOR}"
+        git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+        git tag -a "${new_tag}" -m "Release ${new_tag}"
+
+        if [[ "$PUSH" == "true" ]]; then
+          git push origin "refs/tags/${new_tag}"
+        fi
