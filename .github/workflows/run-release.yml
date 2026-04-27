@@ -27,17 +27,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Generate temporary GitHub token
+      - name: Generate temporary GitHub token (optional)
         id: generate-token
+        if: vars.APP_ID != '' && secrets.APP_PRIVATE_KEY != ''
+        continue-on-error: true
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      - name: Set token variable
+        id: set-token
+        run: |
+          if [ -n "${{ steps.generate-token.outputs.token }}" ]; then
+            echo "Using GitHub App token"
+            echo "token=${{ steps.generate-token.outputs.token }}" >> $GITHUB_OUTPUT
+            echo "token_type=GitHub App" >> $GITHUB_OUTPUT
+          else
+            echo "Using built-in GITHUB_TOKEN (fallback)"
+            echo "token=${{ github.token }}" >> $GITHUB_OUTPUT
+            echo "token_type=Built-in" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run binary with temporary token
         env:
-          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.set-token.outputs.token }}
         run: |
+          echo "🔑 Using token type: ${{ steps.set-token.outputs.token_type }}"
           ./agent --help
           # Add your actual command here, for example:
           # ./agent run --config config.yml
