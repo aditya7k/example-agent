@@ -111,7 +111,7 @@ jobs:
   # `gh release download` or a plain HTTPS URL.
   release:
     name: release
-    if: startsWith(github.ref, 'refs/tags/v')
+    #if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
