@@ -1,0 +1,43 @@
+name: Run Release Binary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  run-binary:
+    name: Run release binary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download latest release binary
+        run: |
+          # Get the latest release and download the linux-amd64 binary
+          gh release download --repo ${{ github.repository }} --pattern 'agent-linux-amd64' --output agent
+          chmod +x agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Generate temporary GitHub token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Run binary with temporary token
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          ./agent --help
+          # Add your actual command here, for example:
+          # ./agent run --config config.yml
