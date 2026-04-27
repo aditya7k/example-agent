@@ -1,0 +1,130 @@
+name: build
+
+# Builds the `agent` binary for linux/amd64 and linux/arm64 and uploads
+# each as a workflow artifact. Other workflows (in this repo or another)
+# can consume these artifacts via actions/download-artifact.
+#
+# Consume from the SAME repo, SAME workflow run:
+#   - uses: actions/download-artifact@v4
+#     with:
+#       name: agent-linux-amd64
+#
+# Consume from ANOTHER workflow run in the same repo:
+#   - uses: actions/download-artifact@v4
+#     with:
+#       name: agent-linux-amd64
+#       github-token: ${{ secrets.GITHUB_TOKEN }}
+#       run-id: <upstream-run-id>
+#
+# Consume from ANOTHER repository:
+#   - uses: actions/download-artifact@v4
+#     with:
+#       name: agent-linux-amd64
+#       repository: <owner>/<repo>
+#       github-token: ${{ secrets.GH_PAT_WITH_ACTIONS_READ }}
+#       run-id: <upstream-run-id>
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      run-id:
+        description: "Run id to pass to actions/download-artifact"
+        value: ${{ jobs.build.outputs.run-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+
+    outputs:
+      run-id: ${{ github.run_id }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify modules
+        run: go mod download
+
+      - name: Vet
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: go vet ./...
+
+      - name: Test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: go test ./...
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          out="dist/agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA}" \
+            -o "$out" \
+            ./cmd/agent
+          echo "ARTIFACT_PATH=$out" >> "$GITHUB_ENV"
+
+      - name: Smoke test (native build only)
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          "${ARTIFACT_PATH}" --help
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # The name is the handle other workflows use to download.
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.ARTIFACT_PATH }}
+          if-no-files-found: error
+          retention-days: 30
+
+  # Optional: when a tag like v1.2.3 is pushed, attach the binaries to a
+  # GitHub Release so they can be fetched without an Actions token via
+  # `gh release download` or a plain HTTPS URL.
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

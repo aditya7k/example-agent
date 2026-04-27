@@ -1,0 +1,30 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+.idea
+
+# Build artifacts
+/bin/
+
+# Coverage and test reports
+/coverage/
+coverage.out
+coverage.html
+
+# Environment variables
+.env
+.envrc
+
+# Generated WASM artifacts
+web/static/main.wasm
+web/static/wasm_exec.js
+
+/server
+/devportal
+
+package-lock.json
